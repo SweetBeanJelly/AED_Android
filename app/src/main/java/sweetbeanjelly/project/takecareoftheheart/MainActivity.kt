@@ -1,13 +1,19 @@
 package sweetbeanjelly.project.takecareoftheheart
 
 import android.Manifest
+import android.app.Dialog
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.location.*
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.*
-import android.widget.ImageView
+import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
@@ -27,18 +33,21 @@ import org.w3c.dom.Element
 import org.w3c.dom.Node
 import javax.xml.parsers.DocumentBuilderFactory
 
+/*
+ 앱 상단 119 버튼 전화 바로가게 ㅇㅇ
+ aed 사용법, cpr 사용법 누르면 다른 화면 전환ㅇㅇ
+ */
+
 class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
     private var googleMap: GoogleMap? = null
     private var lat: Double? = null
     private var lon: Double? = null
 
     private val job = SupervisorJob()
+    private lateinit var dialog: Dialog
 
     // permission
-    var REQUIRED_PERMISSIONS = arrayOf(
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.ACCESS_COARSE_LOCATION
-    )
+    private var REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
     private var layout: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,18 +59,64 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
         setContentView(R.layout.activity_main)
         layout = findViewById(R.id.mainView)
 
-        val menu = findViewById<ImageView>(R.id.menu)
+        val btnDialog = findViewById<TextView>(R.id.menu)
+        val btnCall = findViewById<TextView>(R.id.btnEmergencies)
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
         setSupportActionBar(toolbar)
 
-        menu.setOnClickListener {
-            println("확인")
+        dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(R.layout.dialog_aed)
+
+        btnDialog.setOnClickListener {
+            // showDialog()
+            val intent = Intent(this@MainActivity, MainDialog::class.java)
+            startActivity(intent)
+        }
+        btnCall.setOnClickListener {
+            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:119"))
+            startActivity(intent)
         }
 
         val mapFragment = supportFragmentManager.findFragmentById(R.id.mapView) as SupportMapFragment?
         mapFragment!!.getMapAsync(this)
 
         getLocation()
+    }
+
+    private fun showDialog() {
+        dialog.show()
+        dialog.window!!.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+        val esc = dialog.findViewById<TextView>(R.id.btnEsc)
+        esc.setOnClickListener {
+            dialog.dismiss()
+        }
+        val cpr = dialog.findViewById<Button>(R.id.btn1)
+        cpr.setOnClickListener {
+            val intent = Intent(this@MainActivity, DialogCprActivity::class.java)
+            startActivity(intent)
+            dialog.dismiss()
+        }
+        val aed = dialog.findViewById<Button>(R.id.btn2)
+        aed.setOnClickListener {
+            val intent = Intent(this@MainActivity, DialogAedActivity::class.java)
+            startActivity(intent)
+            dialog.dismiss()
+        }
+    }
+
+    private var backPressedTime = 0L
+
+    override fun onBackPressed() {
+        if(System.currentTimeMillis() > backPressedTime + 2500) {
+            backPressedTime = System.currentTimeMillis()
+            Toast.makeText(this, "뒤로가기 버튼을 한번 더 누르면 종료합니다.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if(System.currentTimeMillis() <= backPressedTime + 2500) {
+            finishAffinity()
+        }
     }
 
     private fun getLocation() {
@@ -96,11 +151,11 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
     }
 
     private fun readHeart() = GlobalScope.launch(job) {
-        var markerLat = ""
-        var markerLon = ""
-        var title = "" // 기관명
-        var place = "" // AED 설치된 위치
-        var address = "" // 주소
+        lateinit var markerLat: String
+        lateinit var markerLon: String
+        lateinit var title: String // 기관명
+        lateinit var place : String // AED 설치된 위치
+        lateinit var address: String // 주소
 
         val row = 10 // AED 목록의 수, 기본값 10
 
@@ -132,12 +187,12 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
                     place = element.getElementsByTagName("buildPlace").item(0).textContent
 
                     val location = LatLng(markerLat.toDouble(), markerLon.toDouble())
-                    val marker = MarkerOptions().position(location).title(title).snippet(place).draggable(
-                        true
-                    ).icon(BitmapDescriptorFactory.fromBitmap(bitmap))
+                    val marker = MarkerOptions().position(location).title(title).snippet(place).draggable(true).icon(BitmapDescriptorFactory.fromBitmap(bitmap))
 
                     runOnUiThread {
-                        googleMap!!.addMarker(marker)
+                        if(i == 0) {
+                            googleMap!!.addMarker(marker).showInfoWindow()
+                        } else googleMap!!.addMarker(marker)
                     }
 
                     println("$title 위치 : $place")
@@ -193,6 +248,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
         this.googleMap!!.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15F))
         this.googleMap!!.isMyLocationEnabled = true
         this.googleMap!!.uiSettings.isZoomControlsEnabled = true
+        this.googleMap!!.uiSettings.isCompassEnabled = false
+        this.googleMap!!.uiSettings.isMapToolbarEnabled = false
     }
 
     companion object {
