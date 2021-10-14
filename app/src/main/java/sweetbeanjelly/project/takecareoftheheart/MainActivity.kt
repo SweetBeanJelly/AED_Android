@@ -2,6 +2,8 @@ package sweetbeanjelly.project.takecareoftheheart
 
 import android.Manifest
 import android.app.Dialog
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -13,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.*
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -23,6 +26,7 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.core.graphics.drawable.toBitmap
 import com.google.android.gms.maps.*
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.material.snackbar.Snackbar
@@ -33,10 +37,9 @@ import org.w3c.dom.Element
 import org.w3c.dom.Node
 import javax.xml.parsers.DocumentBuilderFactory
 
-/*
- 앱 상단 119 버튼 전화 바로가게 ㅇㅇ
- aed 사용법, cpr 사용법 누르면 다른 화면 전환ㅇㅇ
- */
+// 현재 위치 반경 추가, 사용 X
+// 마커 자세히
+// 마커 자세히 - 주소 복사
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
     private var googleMap: GoogleMap? = null
@@ -45,9 +48,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
 
     private val job = SupervisorJob()
     private lateinit var dialog: Dialog
+    private lateinit var dialogAed: Dialog
 
     // permission
-    private var REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+    private var REQUIRED_PERMISSIONS = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
     private var layout: View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,12 +73,18 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
 
         dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        dialog.setContentView(R.layout.dialog_aed)
+        dialog.setContentView(R.layout.dialog_use)
+
+        dialogAed = Dialog(this)
+        dialogAed.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialogAed.setContentView(R.layout.dialog_aed)
 
         btnDialog.setOnClickListener {
-            // showDialog()
+            showDialog()
+            /*
             val intent = Intent(this@MainActivity, MainDialog::class.java)
             startActivity(intent)
+            */
         }
         btnCall.setOnClickListener {
             val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:119"))
@@ -88,7 +101,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
         dialog.show()
         dialog.window!!.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
 
-        val esc = dialog.findViewById<TextView>(R.id.btnEsc)
+        val esc = dialog.findViewById<ImageButton>(R.id.btnEsc)
         esc.setOnClickListener {
             dialog.dismiss()
         }
@@ -158,6 +171,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
         lateinit var address: String // 주소
 
         val row = 10 // AED 목록의 수, 기본값 10
+        val checkAddress = mutableMapOf<String, String>()
 
         try {
             val url = HeartAPI.url + "WGS84_LON=" + lon + "&WGS84_LAT=" + lat + "&numOfRows=" + row + "&serviceKey=" + HeartAPI.key
@@ -185,17 +199,24 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
                     markerLon = element.getElementsByTagName("wgs84Lon").item(0).textContent
                     title = element.getElementsByTagName("org").item(0).textContent
                     place = element.getElementsByTagName("buildPlace").item(0).textContent
+                    address = element.getElementsByTagName("buildAddress").item(0).textContent
 
                     val location = LatLng(markerLat.toDouble(), markerLon.toDouble())
                     val marker = MarkerOptions().position(location).title(title).snippet(place).draggable(true).icon(BitmapDescriptorFactory.fromBitmap(bitmap))
+                    val checkData = marker.snippet!!
+                    checkAddress[checkData] = address
 
                     runOnUiThread {
-                        if(i == 0) {
-                            googleMap!!.addMarker(marker).showInfoWindow()
-                        } else googleMap!!.addMarker(marker)
-                    }
 
-                    println("$title 위치 : $place")
+                        if(i == 0) googleMap!!.addMarker(marker).showInfoWindow()
+                        googleMap!!.addMarker(marker)
+                        googleMap!!.setOnInfoWindowClickListener {
+                            val markerCheck = it.snippet!!
+                            checkAddress[markerCheck]?.let { address -> showAedDialog(it.title, it.snippet, address) }
+                            println("[위치] $markerCheck [주소] ${checkAddress[markerCheck]}")
+                        }
+
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -204,9 +225,33 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
     }.start()
 
     private val bitmap by lazy {
-        //
         val bitmap = ResourcesCompat.getDrawable(resources, R.drawable.ic_pin, null)?.toBitmap()
         Bitmap.createScaledBitmap(bitmap!!, 44, 44, false)
+    }
+
+    private fun showAedDialog(title: String, content: String, address: String) {
+        dialogAed.show()
+        dialogAed.window!!.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+
+        val esc = dialogAed.findViewById<ImageButton>(R.id.btnClose)
+        esc.setOnClickListener {
+            dialogAed.dismiss()
+        }
+
+        val txtTitle = dialogAed.findViewById<TextView>(R.id.txtTitle)
+        txtTitle.text = title
+
+        val txtContent = dialogAed.findViewById<TextView>(R.id.txtContent)
+        txtContent.text = content
+
+        val clipboardManager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        val addressCopy = dialogAed.findViewById<Button>(R.id.btnAddressCopy)
+        addressCopy.setOnClickListener {
+            val clipData = ClipData.newPlainText("Address", address)
+            clipboardManager.setPrimaryClip(clipData)
+            println("복사 확인 [주소] $clipData")
+            Toast.makeText(this@MainActivity, "주소가 복사 되었습니다.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -245,8 +290,15 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback, LocationListener {
 
 //        val marker = MarkerOptions().position(location).title("현재 위치").draggable(true)
 //        this.googleMap!!.addMarker(marker)
+
+        val circle1 = CircleOptions().center(location)
+                .radius(200.0) // 반지름
+                .strokeWidth(0f) // 선
+                //.fillColor(Color.parseColor("#43303F9F"))
+
         this.googleMap!!.moveCamera(CameraUpdateFactory.newLatLngZoom(location, 15F))
         this.googleMap!!.isMyLocationEnabled = true
+        // this.googleMap!!.addCircle(circle1)
         this.googleMap!!.uiSettings.isZoomControlsEnabled = true
         this.googleMap!!.uiSettings.isCompassEnabled = false
         this.googleMap!!.uiSettings.isMapToolbarEnabled = false
